@@ -45,6 +45,27 @@ class PaymentController extends Controller
         return back()->withInput()->with('error', $result['message']);
     }
 
+    public function paymentLink(string $orderNumber)
+    {
+        $order = Order::where('order_number', $orderNumber)->firstOrFail();
+
+        if ($order->status === 'paid') {
+            return redirect()->route('payment.status', $order->order_number);
+        }
+
+        $result = $this->dbitoPay->createPayment($order, 'payfast');
+
+        if (!$result['success'] || empty($result['redirect_url'])) {
+            return redirect()->route('payment.index', $order->order_number)
+                ->with('error', $result['message']);
+        }
+
+        return view('payment.link', [
+            'order' => $order,
+            'payLink' => $result['redirect_url'],
+        ]);
+    }
+
     public function status(string $orderNumber)
     {
         $order = Order::where('order_number', $orderNumber)

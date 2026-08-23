@@ -107,6 +107,15 @@
             </p>
         </form>
 
+        @unless($abaixoDoMinimo)
+        <div class="mt-4 text-center">
+            <a href="{{ route('payment.link', $order->order_number) }}"
+               class="text-sm text-brand-700 hover:text-brand-800 underline">
+                Ou gere um link de pagamento para usar noutro dispositivo 📱
+            </a>
+        </div>
+        @endunless
+
         <div class="mt-6 text-center">
             <div class="flex items-center justify-center gap-2 text-xs text-gray-400">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

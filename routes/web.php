@@ -28,6 +28,7 @@ Route::post('/finalizar', [CheckoutController::class, 'store'])->name('checkout.
 Route::post('/pagamento/callback', [PaymentController::class, 'callback'])->name('payment.callback');
 Route::get('/pagamento/{orderNumber}', [PaymentController::class, 'index'])->name('payment.index');
 Route::post('/pagamento/{orderNumber}', [PaymentController::class, 'process'])->name('payment.process');
+Route::get('/pagamento/{orderNumber}/link', [PaymentController::class, 'paymentLink'])->name('payment.link');
 Route::get('/pagamento/{orderNumber}/status', [PaymentController::class, 'status'])->name('payment.status');
 
 Route::prefix('admin')->name('admin.')->group(function () {
