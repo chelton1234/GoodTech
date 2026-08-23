@@ -56,6 +56,9 @@
                     <td class="px-6 py-4 text-gray-500">{{ $order->created_at->format('d/m/Y H:i') }}</td>
                     <td class="px-6 py-4">
                         <a href="{{ route('admin.orders.show', $order) }}" class="text-brand-600 hover:underline text-xs font-medium">Ver Detalhes</a>
+                        @if(in_array($order->status, ['pending', 'processing']))
+                        <a href="{{ route('payment.link', $order->order_number) }}" target="_blank" title="Gerar link de pagamento" class="ml-2 text-xs font-medium text-gray-400 hover:text-brand-600">🔗 Link</a>
+                        @endif
                     </td>
                 </tr>
                 @empty

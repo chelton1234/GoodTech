@@ -14,6 +14,12 @@
             {{ ucfirst($order->status) }}
         </span>
     </div>
+    @if(in_array($order->status, ['pending', 'processing']))
+    <a href="{{ route('payment.link', $order->order_number) }}" target="_blank"
+       class="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition">
+        🔗 Gerar link de pagamento para o cliente
+    </a>
+    @endif
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
