@@ -16,7 +16,9 @@
         </div>
 
         @php
-            $zarRate = (float) config('services.debitopay.zar_rate', 3.60);
+            $zarRate = \App\Services\DbitoPayService::zarRate();
+            $zarNet = round($order->total / max($zarRate, 0.01), 2);
+            $payfastBr = \App\Services\DbitoPayService::payfastBreakdown($zarNet);
         @endphp
 
         <div class="bg-gray-50 rounded-xl p-4 mb-4 text-center">
@@ -44,7 +46,8 @@
         </a>
 
         <p class="text-center text-xs text-gray-400">
-            Valor aproximado em Rand: R&thinsp;{{ number_format(round($order->total / max($zarRate, 0.01), 2), 2, ',', '.') }}
+            Valor a pagar (taxas incluídas): R&thinsp;{{ number_format($payfastBr['gross'], 2, ',', '.') }}
+            · Líquido para a conta: R&thinsp;{{ number_format($payfastBr['net'], 2, ',', '.') }}
         </p>
     </div>
 </div>

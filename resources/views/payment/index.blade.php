@@ -33,10 +33,50 @@
         @endif
 
         @php
-            $zarRate = (float) config('services.debitopay.zar_rate', 3.60);
-            $zarAmount = round($order->total / max($zarRate, 0.01), 2);
+            $zarRate = \App\Services\DbitoPayService::zarRate();
+            $zarNet = round($order->total / max($zarRate, 0.01), 2);
+            $payfastBr = \App\Services\DbitoPayService::payfastBreakdown($zarNet);
+            $zarAmount = $payfastBr['gross'];
             $payfastMinZar = \App\Services\DbitoPayService::MIN_AMOUNTS['payfast']['ZAR'];
-            $abaixoDoMinimo = $zarAmount < $payfastMinZar;
+            $payfastBelowMin = $zarAmount < $payfastMinZar;
+
+            $methods = [
+                'mpesa' => [
+                    'label' => 'M-Pesa',
+                    'desc' => 'Pagamento pelo telemóvel — confirmação imediata (mín. 10 MT)',
+                    'icon' => '📱',
+                    'min' => 10,
+                    'available' => (string) config('services.debitopay.wallet_mpesa') !== '',
+                ],
+                'emola' => [
+                    'label' => 'e-Mola',
+                    'desc' => 'Pagamento pelo telemóvel (mín. 50 MT)',
+                    'icon' => '💧',
+                    'min' => 50,
+                    'available' => (string) config('services.debitopay.wallet_emola') !== '',
+                ],
+                'visa_mastercard' => [
+                    'label' => 'Cartão Visa / Mastercard (MT)',
+                    'desc' => 'Debitado em meticais com 3D Secure automático (mín. 50 MT)',
+                    'icon' => '💳',
+                    'min' => 50,
+                    'available' => (string) config('services.debitopay.wallet_card') !== '',
+                ],
+                'payfast' => [
+                    'label' => 'PayFast (Rand)',
+                    'desc' => 'Será cobrado R&thinsp;' . number_format($zarAmount, 2, ',', '.') . ' em Rand — taxas incluídas, cai na conta sul-africana',
+                    'icon' => '🛡️',
+                    'available' => (string) config('services.debitopay.wallet_payfast') !== '',
+                ],
+            ];
+            $paymentMethods = array_filter($methods, fn ($m) => $m['available']);
+
+            $minWarnings = [];
+            foreach ($paymentMethods as $value => $m) {
+                if (($m['min'] ?? 0) > 0 && $order->total < $m['min']) {
+                    $minWarnings[$value] = $m['min'];
+                }
+            }
         @endphp
 
         <div class="bg-gray-50 rounded-xl p-4 mb-6">
@@ -55,59 +95,48 @@
                     <span>Total</span>
                     <span class="text-brand-700">{{ number_format($order->total, 2, ',', '.') }} MT</span>
                 </div>
-                <div class="flex justify-between text-sm text-gray-600">
-                    <span>Equivalente em Rand</span>
-                    <span>R&thinsp;{{ number_format($zarAmount, 2, ',', '.') }}</span>
-                </div>
             </div>
         </div>
 
-        @if($abaixoDoMinimo)
+        @if($payfastBelowMin)
         <div class="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4 flex items-start gap-3">
             <svg class="w-5 h-5 text-orange-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.26 16A2 2 0 005 19z"/>
             </svg>
             <p class="text-sm text-orange-700">
-                Este pedido equivale a R&thinsp;{{ number_format($zarAmount, 2, ',', '.') }}, abaixo do mínimo de R&thinsp;{{ number_format($payfastMinZar, 2) }} do PayFast.
-                Adicione mais produtos para atingir pelo menos {{ number_format($payfastMinZar * $zarRate, 2, ',', '.') }} MT.
+                Este pedido fica abaixo do mínimo de R&thinsp;{{ number_format($payfastMinZar, 2) }} do PayFast.
+                Escolha um método em meticais (M-Pesa, e-Mola ou Cartão) para pagar normalmente.
             </p>
         </div>
         @endif
 
-        <form action="{{ route('payment.process', $order->order_number) }}" method="POST" x-data="{ processing: false, method: '' }">
+        <form action="{{ route('payment.process', $order->order_number) }}" method="POST" x-data="{ processing: false }">
             @csrf
             <h3 class="font-semibold mb-3">Método de pagamento:</h3>
             <div class="mb-6">
-                <label class="block">
-                    <input type="radio" name="payment_method" value="payfast" checked class="hidden peer">
-                    <div class="border-2 border-brand-600 bg-brand-50 rounded-xl p-4 flex items-center gap-4">
-                        <span class="text-2xl">🛡️</span>
-                        <div class="flex-1">
-                            <span class="font-medium text-sm">PayFast</span>
-                            <p class="text-xs text-gray-500">Será cobrado R&thinsp;{{ number_format($order->total / 3.60, 2, ',', '.') }} (aprox.) via cartão ou EFT na página segura da Débito Pay</p>
-                        </div>
-                        <svg class="w-5 h-5 text-brand-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                        </svg>
-                    </div>
-                </label>
+                <fieldset>
+                    <legend class="sr-only">Método de pagamento</legend>
+                    @include('partials.payment-methods', [
+                        'paymentMethods' => $paymentMethods,
+                        'minWarnings' => $minWarnings,
+                    ])
+                </fieldset>
             </div>
 
             <button type="submit"
-                class="w-full bg-brand-600 text-white py-3 rounded-lg font-semibold hover:bg-brand-700 transition {{ $abaixoDoMinimo ? 'opacity-50 cursor-not-allowed' : '' }}"
-                @click="{{ $abaixoDoMinimo ? 'return false' : 'processing = true' }}"
-                @if($abaixoDoMinimo) disabled @endif>
-                <span x-show="!processing">Pagar agora — R&thinsp;{{ number_format($zarAmount, 2, ',', '.') }}</span>
-                <span x-show="processing" x-cloak>Redirecionando para a página segura...</span>
+                class="w-full bg-brand-600 text-white py-3 rounded-lg font-semibold hover:bg-brand-700 transition"
+                @click="processing = true">
+                <span x-show="!processing">Pagar agora</span>
+                <span x-show="processing" x-cloak>A processar...</span>
             </button>
 
             <p x-show="processing" x-cloak
                 class="text-xs text-gray-500 text-center mt-3">
-                🔒 Vai ser redirecionado para o checkout seguro da Débito Pay para inserir os dados do cartão.
+                🔒 A redirecionar para a página segura da Débito Pay quando necessário.
             </p>
         </form>
 
-        @unless($abaixoDoMinimo)
+        @unless($payfastBelowMin)
         <div class="mt-4 text-center">
             <a href="{{ route('payment.link', $order->order_number) }}"
                class="text-sm text-brand-700 hover:text-brand-800 underline">

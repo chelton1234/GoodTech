@@ -28,7 +28,7 @@ class PaymentController extends Controller
         }
 
         $validated = $request->validate([
-            'payment_method' => 'required|in:payfast',
+            'payment_method' => 'required|in:payfast,mpesa,emola,visa_mastercard',
         ]);
 
         $result = $this->dbitoPay->createPayment($order, $validated['payment_method']);
@@ -87,7 +87,9 @@ class PaymentController extends Controller
     {
         $signature = $request->header('X-Signature')
             ?? $request->header('X-Webhook-Signature')
-            ?? $request->header('Signature');
+            ?? $request->header('Signature')
+            ?? $request->header('svix-signature')
+            ?? $request->header('webhook-signature');
 
         $this->dbitoPay->handleWebhook($request->getContent(), $signature);
 

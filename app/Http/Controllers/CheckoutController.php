@@ -40,7 +40,9 @@ class CheckoutController extends Controller
         $shipping = 0; // Frete desativado durante fase de testes.
         $total = $subtotal + $shipping;
 
-        return view('checkout.index', compact('items', 'subtotal', 'shipping', 'total'));
+        $paymentMethods = $this->paymentMethods();
+
+        return view('checkout.index', compact('items', 'subtotal', 'shipping', 'total', 'paymentMethods'));
     }
 
     public function store(Request $request)
@@ -52,7 +54,7 @@ class CheckoutController extends Controller
             'shipping_address' => 'required|string',
             'shipping_city' => 'required|string|max:100',
             'notes' => 'nullable|string|max:500',
-            'payment_method' => 'required|in:payfast',
+            'payment_method' => 'required|in:payfast,mpesa,emola,visa_mastercard',
         ]);
 
         $cart = Session::get('cart', []);
@@ -103,5 +105,40 @@ class CheckoutController extends Controller
         Session::forget('cart');
 
         return redirect()->route('payment.index', $order->order_number);
+    }
+
+    protected function paymentMethods()
+    {
+        $methods = [
+            'mpesa' => [
+                'label' => 'M-Pesa',
+                'desc' => 'Pagamento pelo telemóvel — confirmação imediata (mín. 10 MT)',
+                'icon' => '📱',
+                'min' => 10,
+                'available' => (string) config('services.debitopay.wallet_mpesa') !== '',
+            ],
+            'emola' => [
+                'label' => 'e-Mola',
+                'desc' => 'Pagamento pelo telemóvel (mín. 50 MT)',
+                'icon' => '💧',
+                'min' => 50,
+                'available' => (string) config('services.debitopay.wallet_emola') !== '',
+            ],
+            'visa_mastercard' => [
+                'label' => 'Cartão Visa / Mastercard',
+                'desc' => 'Debitado em meticais com 3D Secure automático (mín. 50 MT)',
+                'icon' => '💳',
+                'min' => 50,
+                'available' => (string) config('services.debitopay.wallet_card') !== '',
+            ],
+            'payfast' => [
+                'label' => 'PayFast (Rand)',
+                'desc' => 'Cartão internacional ou EFT, cobrado em Rand para a conta sul-africana',
+                'icon' => '🛡️',
+                'available' => (string) config('services.debitopay.wallet_payfast') !== '',
+            ],
+        ];
+
+        return array_filter($methods, fn ($m) => $m['available']);
     }
 }

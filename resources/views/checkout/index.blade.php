@@ -50,17 +50,10 @@
 
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <h2 class="font-semibold mb-4">Método de Pagamento</h2>
-                <div class="border-2 border-brand-600 bg-brand-50 rounded-xl p-4 flex items-center gap-4">
-                    <span class="text-2xl">🛡️</span>
-                    <div class="flex-1">
-                        <span class="font-medium text-sm">PayFast</span>
-                        <p class="text-xs text-gray-500">Cartão internacional ou EFT — cobrado em Rand (R) na página segura da Débito Pay</p>
-                    </div>
-                    <svg class="w-5 h-5 text-brand-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                    </svg>
-                </div>
-                <input type="hidden" name="payment_method" value="payfast">
+                <fieldset>
+                    <legend class="sr-only">Método de pagamento</legend>
+                    @include('partials.payment-methods', ['paymentMethods' => $paymentMethods])
+                </fieldset>
             </div>
         </div>
 

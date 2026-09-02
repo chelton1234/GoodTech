@@ -47,6 +47,11 @@ return [
         'wallet_payfast' => env('DBITO_PAY_WALLET_PAYFAST', ''),
         'webhook_secret' => env('DBITO_PAY_WEBHOOK_SECRET', ''),
         'zar_rate' => env('DBITO_PAY_ZAR_RATE', 3.60),
+        'zar_margin' => env('DBITO_PAY_ZAR_MARGIN', 0.03),
+        'zar_rate_ttl' => env('DBITO_PAY_ZAR_RATE_TTL', 60),
+        'payfast_fee_rate' => env('DBITO_PAY_PAYFAST_FEE_RATE', 0.07),
+        'payfast_fee_fixed' => env('DBITO_PAY_PAYFAST_FEE_FIXED', 5.00),
+        'payfast_vat' => env('DBITO_PAY_PAYFAST_VAT', 0.15),
     ],
 
 ];

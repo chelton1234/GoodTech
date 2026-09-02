@@ -16,7 +16,9 @@ class DbitoPayService
     protected string $merchantId;
     protected string $walletCode;
     protected string $webhookSecret;
-    protected float $zarRate;
+    protected float $payfastFeeRate;
+    protected float $payfastFeeFixed;
+    protected float $payfastVat;
 
     /**
      * Cada método usa a sua própria carteira (códigos públicos de 5 dígitos).
@@ -30,7 +32,9 @@ class DbitoPayService
         $this->merchantId = config('services.debitopay.merchant_id');
         $this->walletCode = config('services.debitopay.wallet_code');
         $this->webhookSecret = config('services.debitopay.webhook_secret');
-        $this->zarRate = (float) config('services.debitopay.zar_rate', 3.60);
+        $this->payfastFeeRate = (float) config('services.debitopay.payfast_fee_rate', 0.07);
+        $this->payfastFeeFixed = (float) config('services.debitopay.payfast_fee_fixed', 5.00);
+        $this->payfastVat = (float) config('services.debitopay.payfast_vat', 0.15);
         $this->walletCodes = [
             'mpesa' => (string) config('services.debitopay.wallet_mpesa', ''),
             'emola' => (string) config('services.debitopay.wallet_emola', ''),
@@ -43,6 +47,35 @@ class DbitoPayService
     protected function walletCodeFor(string $method): ?string
     {
         return ($this->walletCodes[$method] ?? '') !== '' ? $this->walletCodes[$method] : null;
+    }
+
+    /**
+     * Taxa de câmbio MZN→ZAR em tempo real (open.er-api.com), devolvida como
+     * "MZN por 1 ZAR" (coerente com o fallback 3.60), com margem de segurança
+     * e cache. Se a API falhar, usa a taxa fixa de fallback.
+     */
+    public static function zarRate(): float
+    {
+        $fallback = (float) config('services.debitopay.zar_rate', 3.60);
+        $margin = (float) config('services.debitopay.zar_margin', 0.03);
+        $ttl = (int) config('services.debitopay.zar_rate_ttl', 60);
+
+        $live = cache()->remember('debitopay.live_zar_rate', now()->addMinutes($ttl), function () {
+            try {
+                $response = Http::timeout(5)->get('https://open.er-api.com/v6/latest/MZN');
+                $zarPerMzn = (float) (($response->json('rates') ?? [])['ZAR'] ?? 0);
+
+                return $zarPerMzn > 0 ? (1 / $zarPerMzn) : false;
+            } catch (\Throwable $e) {
+                Log::warning('Débito Pay FX rate fetch failed', ['error' => $e->getMessage()]);
+
+                return false;
+            }
+        });
+
+        $rate = $live ?: $fallback;
+
+        return max(round(($rate / (1 + $margin)), 4), 0.01);
     }
 
     /**
@@ -64,6 +97,35 @@ class DbitoPayService
         'payfast' => ['ZAR' => 10],
     ];
 
+    /**
+     * Gross-up PayFast: calcula o valor bruto a cobrar ao cliente para que
+     * o líquido (após 7% + R5 + VAT 15% sobre as taxas) seja igual ao pedido.
+     */
+    public static function payfastBreakdown(float $netZar): array
+    {
+        $feeRate = (float) config('services.debitopay.payfast_fee_rate', 0.07);
+        $fixed = (float) config('services.debitopay.payfast_fee_fixed', 5.00);
+        $vat = (float) config('services.debitopay.payfast_vat', 0.15);
+
+        $denominator = 1 - ($feeRate * (1 + $vat));
+        $grossCents = ceil((($netZar * 100) + ($fixed * (1 + $vat) * 100)) / $denominator);
+        $gross = $grossCents / 100;
+
+        $variableFee = round($gross * $feeRate, 2);
+        $totalFeeExVat = round($variableFee + $fixed, 2);
+        $vatAmount = round($totalFeeExVat * $vat, 2);
+        $totalFees = round($totalFeeExVat + $vatAmount, 2);
+
+        return [
+            'net' => round($netZar, 2),
+            'gross' => $gross,
+            'variable_fee' => $variableFee,
+            'fixed_fee' => $fixed,
+            'vat' => $vatAmount,
+            'total_fees' => $totalFees,
+        ];
+    }
+
     public function createPayment(Order $order, string $paymentMethod): array
     {
         $method = $paymentMethod === 'card' ? 'visa_mastercard' : $paymentMethod;
@@ -74,7 +136,8 @@ class DbitoPayService
 
         if ($method === 'payfast') {
             $currency = 'ZAR';
-            $amount = round($order->total / max($this->zarRate, 0.01), 2);
+            $netZar = round($order->total / max(self::zarRate(), 0.01), 2);
+            $amount = self::payfastBreakdown($netZar)['gross'];
         } else {
             $currency = 'MZN';
             $amount = (float) $order->total;
@@ -170,9 +233,9 @@ class DbitoPayService
                 'transaction_id' => $data['payment_id'] ?? null,
                 'message' => $isPaid
                     ? 'Pagamento confirmado com sucesso.'
-                    : ($currency === 'ZAR'
-                        ? sprintf('A redirecionar para o PayFast (R %s).', number_format($amount, 2))
-                        : 'Pagamento iniciado.'),
+: ($currency === 'ZAR'
+                    ? sprintf('A redirecionar para o PayFast (R %s, taxas incluídas).', number_format($amount, 2))
+                    : 'Pagamento iniciado.'),
                 'payment_id' => $data['payment_id'] ?? null,
             ];
         } catch (\Throwable $e) {
@@ -226,7 +289,10 @@ class DbitoPayService
     public function handleWebhook(string $rawBody, ?string $signature): bool
     {
         if (!$this->verifySignature($rawBody, $signature)) {
-            Log::warning('Invalid Débito Pay webhook signature');
+            Log::warning('Invalid Débito Pay webhook signature', [
+                'signature' => $signature,
+                'headers' => Request::capture()->headers->all(),
+            ]);
 
             return false;
         }
@@ -299,9 +365,47 @@ class DbitoPayService
             return false;
         }
 
-        $expected = hash_hmac('sha256', $rawBody, $this->webhookSecret);
+        $request = Request::capture();
+        $secret = $this->webhookSecret;
 
-        return hash_equals($expected, $signature);
+        $messages = [$rawBody];
+
+        $id = $request->header('svix-id') ?: $request->header('webhook-id') ?: $request->header('X-Webhook-Id');
+        $ts = $request->header('svix-timestamp') ?: $request->header('webhook-timestamp') ?: $request->header('X-Webhook-Timestamp');
+
+        if ($id && $ts) {
+            $messages[] = "{$id}.{$ts}.{$rawBody}";
+        }
+
+        if ($ts) {
+            $messages[] = "{$ts}.{$rawBody}";
+        }
+
+        $candidates = [$signature];
+
+        if (str_contains($signature, ',')) {
+            $candidates = array_map('trim', explode(',', $signature));
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidate = preg_replace('/^v[0-9]+,?/i', '', trim($candidate));
+
+            foreach ($messages as $message) {
+                $hex = hash_hmac('sha256', $message, $secret);
+
+                if (hash_equals(strtolower($hex), strtolower($candidate))) {
+                    return true;
+                }
+
+                $base64 = base64_encode(hash_hmac('sha256', $message, $secret, true));
+
+                if (hash_equals($base64, $candidate)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
